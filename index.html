@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="DarkPad Pro">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3767/3767084.png">
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3767/3767084.png">
+    
+    <meta name="theme-color" content="#050a0f">
+    <link rel="manifest" href="manifest.json">
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('DarkPad: Sistema de archivos listo'))
+                    .catch(err => console.log('Error SW:', err));
+            });
+        }
+    </script>
+
+    <title>Dark Pad Pro V18.2</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
+
+    <style>
+        [x-cloak] { display: none !important; }
+        body { 
+            background-color: #050a0f; 
+            color: #e2e8f0; 
+            font-family: system-ui, sans-serif; 
+            overflow: hidden; 
+            height: 100vh; 
+            user-select: none;
+            padding-top: env(safe-area-inset-top);
+        }
+        .bg-pure-black { background-color: #000000 !important; }
+        
+        .c-slate { background-color: #1e293b !important; } .c-zinc { background-color: #27272a !important; }
+        .c-red { background-color: #7f1d1d !important; } .c-orange { background-color: #7c2d12 !important; }
+        .c-green { background-color: #064e3b !important; } .c-sky { background-color: #0c4a6e !important; }
+        .c-blue { background-color: #1e3a8a !important; } .c-rose { background-color: #881337 !important; }
+
+        .modal-container { 
+            width: 96%; max-width: 500px; height: 92vh;
+            border-radius: 3.5rem; overflow: hidden; display: flex; flex-direction: column; 
+            border: 2px solid rgba(255,255,255,0.1); 
+        }
+
+        .wake-strobe { animation: strobe-bg 0.15s infinite; }
+        @keyframes strobe-bg { 0%, 100% { background-color: #000; } 50% { background-color: #f15a02; } }
+        
+        .glow-bell { filter: drop-shadow(0 0 20px #f15a02); animation: ring 0.6s infinite; }
+        @keyframes ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(15deg); } 80% { transform: rotate(-15deg); } }
+        
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        input, textarea { user-select: text !important; font-size: 18px !important; }
+    </style>
+</head>
+<body x-data="notesApp()" x-init="init()" :class="config.pureBlack ? 'bg-pure-black' : ''">
+
+    <template x-if="activeAlarm">
+        <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center wake-strobe p-6">
+            <div class="bg-black/90 p-12 rounded-[4rem] border-4 border-white text-center shadow-2xl">
+                <span class="material-symbols-outlined text-[120px] text-white animate-bounce">notifications_active</span>
+                <h2 class="text-5xl font-black text-white mt-6 uppercase italic">¡AVISO!</h2>
+                <p class="text-orange-500 font-black text-3xl mt-4" x-text="activeAlarm.titulo || 'TURNO'"></p>
+                <button @click="stopAlarm()" class="mt-12 bg-white text-black px-20 py-8 rounded-3xl font-black text-3xl active:scale-95 transition-transform">ENTENDIDO</button>
+            </div>
+        </div>
+    </template>
+
+    <header class="p-6 pb-2 sticky top-0 z-50 bg-inherit border-b border-white/10">
+        <div class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-2xl font-black text-orange-500 italic uppercase">Dark Pad <span class="text-white">Pro</span></h1>
+                <p class="text-[10px] font-black text-sky-500 uppercase tracking-[0.2em]">V18.2 - MENORCA BUS</p>
+            </div>
+            <button @click="ui.showSettings = true" class="p-4 bg-white/5 rounded-full"><span class="material-symbols-outlined text-sky-400 text-3xl">settings</span></button>
+        </div>
+        
+        <div class="flex items-center justify-between bg-white/5 p-3 rounded-2xl border border-white/10">
+            <div class="flex items-center gap-2">
+                <button @click="ui.showSearch = !ui.showSearch" class="p-2 text-sky-400"><span class="material-symbols-outlined text-2xl">search</span></button>
+                <input x-show="ui.showSearch" x-model="search" type="text" placeholder="Buscar..." class="w-32 bg-transparent outline-none text-base text-white">
+            </div>
+            <div class="flex gap-4 text-sky-400">
+                <button @click="ui.showFullCalendar = true" class="p-2"><span class="material-symbols-outlined text-3xl">calendar_month</span></button>
+                <button @click="selectedDate = null; search = ''" class="p-2 opacity-30"><span class="material-symbols-outlined text-3xl">restart_alt</span></button>
+            </div>
+        </div>
+    </header>
+
+    <section class="px-4 py-4 bg-white/5 overflow-x-auto whitespace-nowrap hide-scrollbar flex gap-3 border-b border-white/10">
+        <template x-for="day in recentDays" :key="day.dateStr">
+            <button @click="selectedDate = (selectedDate === day.dateStr ? null : day.dateStr)" 
+                 class="flex flex-col items-center min-w-[75px] p-5 rounded-[2rem] transition-all border-2"
+                 :class="selectedDate === day.dateStr ? 'bg-sky-600 border-sky-400 text-white shadow-xl' : 'bg-white/5 border-transparent'">
+                <span class="text-[10px] uppercase font-black opacity-60" x-text="day.weekday"></span>
+                <span class="text-xl font-black" x-text="day.dayNum"></span>
+                <div x-show="day.hasNote" class="w-2 h-2 bg-orange-500 rounded-full mt-1"></div>
+            </button>
+        </template>
+    </section>
+
+    <main class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-5 h-[calc(100vh-280px)] overflow-y-auto pb-48 hide-scrollbar">
+        <template x-for="nota in notasFiltradas" :key="nota.id">
+            <div @click="abrirNota(nota)" class="p-6 min-h-[160px] rounded-[3rem] flex flex-col justify-between border border-white/5 shadow-2xl active:scale-95 transition-transform" :class="[nota.estilo, nota.pinned ? 'ring-4 ring-orange-500' : '']">
+                <div>
+                    <h4 class="text-[11px] font-black uppercase opacity-60 mb-2 tracking-widest" x-text="nota.titulo || 'NOTA VACÍA'"></h4>
+                    <p class="font-bold leading-snug line-clamp-3 text-lg" x-text="nota.type === 'checklist' ? '✓ Lista de tareas' : (nota.texto || 'Sin contenido...')"></p>
+                </div>
+                <div class="flex justify-between items-center opacity-70 text-[11px] font-black mt-4">
+                    <span x-text="nota.fecha"></span>
+                    <span x-show="nota.reminderTime" class="material-symbols-outlined text-2xl text-orange-400 animate-pulse">alarm</span>
+                </div>
+            </div>
+        </template>
+    </main>
+
+    <div class="fixed bottom-12 right-8 z-[300] flex flex-col items-end gap-4">
+        <div x-show="ui.showFabMenu" x-transition x-cloak class="flex flex-col gap-3">
+            <button @click="nuevaNota('checklist')" class="flex items-center gap-4 bg-sky-600 text-white px-8 py-5 rounded-[2rem] font-black text-sm uppercase shadow-2xl">LISTA <span class="material-symbols-outlined">fact_check</span></button>
+            <button @click="nuevaNota('note')" class="flex items-center gap-4 bg-orange-600 text-white px-8 py-5 rounded-[2rem] font-black text-sm uppercase shadow-2xl">NOTA <span class="material-symbols-outlined">edit_note</span></button>
+        </div>
+        <button @click="ui.showFabMenu = !ui.showFabMenu" class="w-20 h-20 bg-white text-black rounded-[2.5rem] flex items-center justify-center shadow-2xl active:scale-90" :class="ui.showFabMenu ? 'rotate-45 bg-red-600 text-white' : ''">
+            <span class="material-symbols-outlined text-5xl font-black">add</span>
+        </button>
+    </div>
+
+    <div x-show="notaExpandida" x-transition x-cloak class="fixed inset-0 bg-black/90 z-[400] flex items-center justify-center backdrop-blur-2xl">
+        <div class="modal-container shadow-2xl" :class="notaExpandida?.estilo">
+            <div class="p-6 flex justify-between items-center bg-black/30">
+                <div class="flex gap-3">
+                    <button @click="insertarDato('INICIO')" class="bg-white/10 px-4 py-3 rounded-2xl text-xs font-black uppercase italic">INICIO</button>
+                    <button @click="insertarDato('FIN')" class="bg-white/10 px-4 py-3 rounded-2xl text-xs font-black uppercase italic">FIN</button>
+                    <button @click="insertarDato('BUS')" class="bg-white/10 px-4 py-3 rounded-2xl text-xs font-black uppercase italic">BUS #</button>
+                </div>
+                <button @click="cerrarNota()" class="w-12 h-12 bg-black/40 rounded-full flex items-center justify-center"><span class="material-symbols-outlined text-3xl">close</span></button>
+            </div>
+            
+            <div class="px-8 pt-6">
+                <div class="text-[10px] font-black opacity-50 mb-2 tracking-[0.2em]" x-text="'FECHA REGISTRO: ' + notaExpandida?.fecha"></div>
+                <input x-model="notaExpandida.titulo" @input="guardar()" class="w-full bg-black/20 p-5 rounded-3xl font-black text-xl outline-none border border-white/10" :style="{ color: 'inherit' }" placeholder="TÍTULO O SERVICIO">
+            </div>
+            
+            <div class="flex-grow p-8 overflow-y-auto hide-scrollbar">
+                <template x-if="notaExpandida?.type === 'note'">
+                    <textarea x-model="notaExpandida.texto" @input="guardar()" class="w-full h-full bg-transparent outline-none resize-none font-bold text-xl leading-relaxed" :style="{ fontSize: (notaExpandida?.textSize || 20) + 'px', color: 'inherit' }" placeholder="Incidencias..."></textarea>
+                </template>
+                <template x-if="notaExpandida?.type === 'checklist'">
+                    <div class="space-y-4 pb-12">
+                        <template x-for="(item, index) in notaExpandida.items">
+                            <div class="bg-black/20 p-5 rounded-3xl flex items-center gap-4 border border-white/5">
+                                <button @click="item.done = !item.done; guardar()" :class="item.done ? 'text-green-400' : 'opacity-40'"><span class="material-symbols-outlined text-3xl" x-text="item.done ? 'check_circle' : 'circle'"></span></button>
+                                <input x-model="item.text" @input="guardar()" class="bg-transparent outline-none flex-grow font-bold text-lg" :class="item.done ? 'line-through opacity-50' : ''">
+                                <button @click="notaExpandida.items.splice(index, 1); guardar()" class="opacity-20"><span class="material-symbols-outlined">delete</span></button>
+                            </div>
+                        </template>
+                        <button @click="notaExpandida.items.push({text: '', done: false})" class="w-full p-6 border-2 border-dashed border-white/10 rounded-[2rem] text-sm font-black opacity-50 uppercase">+ AÑADIR LÍNEA</button>
+                    </div>
+                </template>
+            </div>
+
+            <div x-show="ui.showAlarmPanel" class="p-8 bg-black/90 border-t-2 border-orange-500/30">
+                <div class="flex justify-between items-center mb-6"><span class="text-xs font-black text-orange-500 uppercase tracking-widest italic">Programar Aviso</span><button @click="notaExpandida.reminderTime = null; guardar(); ui.showAlarmPanel = false" class="text-xs font-black text-red-500 underline uppercase">ELIMINAR</button></div>
+                <input type="time" x-model="notaExpandida.reminderTime" @change="guardar()" class="bg-white/5 p-8 rounded-[2.5rem] w-full text-white font-black text-6xl outline-none border border-white/10 text-center">
+            </div>
+
+            <div class="p-10 flex justify-around border-t border-white/5 bg-black/40">
+                <button @click="ui.showAlarmPanel = !ui.showAlarmPanel" :class="notaExpandida?.reminderTime ? 'glow-bell text-orange-500' : 'opacity-30'"><span class="material-symbols-outlined text-4xl" :style="notaExpandida?.reminderTime ? 'font-variation-settings: \'FILL\' 1' : ''">alarm</span></button>
+                <button @click="ciclarTexto()" class="opacity-40 font-black text-xl">AA</button>
+                <button @click="notaExpandida.pinned = !notaExpandida.pinned; guardar()" :class="notaExpandida?.pinned ? 'text-sky-400' : 'opacity-30'"><span class="material-symbols-outlined text-4xl" :style="notaExpandida?.pinned ? 'font-variation-settings: \'FILL\' 1' : ''">push_pin</span></button>
+                <button @click="borrarNota()" class="opacity-10"><span class="material-symbols-outlined text-4xl">delete</span></button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="ui.showFullCalendar" x-transition x-cloak class="fixed inset-0 bg-black/95 z-[500] flex items-center justify-center p-6">
+        <div class="bg-[#0f172a] w-full max-w-md rounded-[4rem] p-10 border border-white/10 shadow-2xl">
+            <div class="flex justify-between items-center mb-10 text-center">
+                <h2 class="font-black uppercase text-sky-400 text-sm tracking-widest italic">Planificador</h2>
+                <button @click="ui.showFullCalendar = false" class="p-3 bg-white/5 rounded-full"><span class="material-symbols-outlined text-3xl">close</span></button>
+            </div>
+            <div class="grid grid-cols-7 gap-4 text-center">
+                <template x-for="day in fullMonthDays" :key="day.dateStr">
+                    <button @click="crearDesdeCalendario(day.dateStr)" class="aspect-square flex flex-col items-center justify-center rounded-[1.5rem] text-sm font-black transition-all active:scale-90" :class="selectedDate === day.dateStr ? 'bg-sky-500 text-white' : 'bg-white/5 text-white/40'">
+                        <span x-text="day.dayNum"></span>
+                        <div x-show="day.hasNote" class="w-2 h-2 bg-orange-500 rounded-full mt-1"></div>
+                    </button>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="ui.showSettings" x-transition x-cloak class="fixed inset-0 bg-[#050a0f] z-[600] p-12 overflow-y-auto">
+        <div class="flex justify-between items-center mb-16"><h2 class="text-3xl font-black uppercase italic tracking-tighter">Opciones</h2><button @click="ui.showSettings = false" class="bg-white text-black px-10 py-4 rounded-full text-xs font-black uppercase">Cerrar</button></div>
+        <div class="space-y-8">
+            <button @click="exportar()" class="w-full bg-green-600/20 text-green-400 p-8 rounded-[2.5rem] font-black text-sm flex justify-between items-center uppercase italic">Exportar Copia <span class="material-symbols-outlined text-3xl">download</span></button>
+            <button @click="$refs.fileInput.click()" class="w-full bg-orange-600/20 text-orange-400 p-8 rounded-[2.5rem] font-black text-sm flex justify-between items-center uppercase italic">Importar Copia <span class="material-symbols-outlined text-3xl">upload</span></button>
+            <input type="file" x-ref="fileInput" class="hidden" @change="importar($event)">
+            <button @click="config.pureBlack = !config.pureBlack; guardar()" class="w-full bg-white/5 p-8 rounded-[2.5rem] border-2 border-white/10 font-black text-sm flex justify-between items-center uppercase italic">Modo Negro Puro <span class="bg-sky-500 text-white px-6 py-2 rounded-full text-[10px]" x-text="config.pureBlack ? 'SÍ' : 'NO'"></span></button>
+        </div>
+    </div>
+
+    <script>
+        function notesApp() {
+            return {
+                notas: [], notaExpandida: null, search: '', selectedDate: null, activeAlarm: null,
+                ui: { showSearch: false, showSettings: false, showAlarmPanel: false, showFullCalendar: false, showFabMenu: false },
+                config: { pureBlack: false }, alarmInterval: null, wakeLock: null,
+                estilos: ['c-slate', 'c-zinc', 'c-red', 'c-orange', 'c-green', 'c-sky', 'c-blue', 'c-rose'],
+
+                init() {
+                    this.notas = JSON.parse(localStorage.getItem('darkpad_v18')) || [];
+                    this.config = JSON.parse(localStorage.getItem('darkpad_conf_v18')) || { pureBlack: false };
+                    
+                    setInterval(() => {
+                        if (this.activeAlarm) return;
+                        const d = new Date();
+                        const h = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+                        const f = d.toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit'});
+                        this.notas.forEach(n => { if (n.reminderTime === h && n.fecha === f) { this.startAlarm(n); } });
+                    }, 5000);
+                    this.requestWakeLock();
+                },
+
+                async requestWakeLock() { if ('wakeLock' in navigator) { try { this.wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {} } },
+
+                startAlarm(nota) {
+                    this.activeAlarm = nota; nota.reminderTime = null; this.guardar();
+                    if (window.navigator.vibrate) {
+                        window.navigator.vibrate([1000, 200, 1000, 200, 1000]);
+                        this.alarmInterval = setInterval(() => window.navigator.vibrate([1000, 200]), 2500);
+                    }
+                },
+
+                stopAlarm() { this.activeAlarm = null; clearInterval(this.alarmInterval); if (window.navigator.vibrate) window.navigator.vibrate(0); },
+
+                crearDesdeCalendario(fecha) {
+                    this.ui.showFullCalendar = false;
+                    const n = { id: Date.now(), type: 'note', titulo: '', texto: '', textSize: 20, items: [], fecha: fecha, estilo: this.estilos[Math.floor(Math.random() * this.estilos.length)], pinned: false, reminderTime: null }; 
+                    this.notas.unshift(n); this.guardar(); this.abrirNota(n);
+                },
+
+                insertarDato(tipo) {
+                    const h = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    if (tipo === 'INICIO') this.notaExpandida.texto += `\n[INICIO: ${h}] `;
+                    if (tipo === 'FIN') this.notaExpandida.texto += `\n[FIN: ${h}] `;
+                    if (tipo === 'BUS') {
+                        const num = prompt("Número de Bus:");
+                        if (num) this.notaExpandida.texto += `\n[BUS: ${num}] `;
+                    }
+                    this.guardar();
+                },
+
+                nuevaNota(tipo) { 
+                    const h = new Date().toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit'});
+                    if (tipo === 'checklist') {
+                        const n = { id: Date.now(), type: 'checklist', titulo: '', items: [{text:'', done:false}], fecha: h, estilo: 'c-slate', pinned: false, reminderTime: null };
+                        this.notas.unshift(n); this.guardar(); this.abrirNota(n);
+                    } else {
+                        this.crearDesdeCalendario(h);
+                    }
+                    this.ui.showFabMenu = false; 
+                },
+
+                ciclarTexto() { const s = [18, 22, 28, 36]; let i = s.indexOf(this.notaExpandida.textSize || 20); this.notaExpandida.textSize = s[(i+1)%s.length]; this.guardar(); },
+                abrirNota(n) { this.notaExpandida = n; this.ui.showAlarmPanel = false; },
+                cerrarNota() { this.guardar(); this.notaExpandida = null; },
+                guardar() { localStorage.setItem('darkpad_v18', JSON.stringify(this.notas)); localStorage.setItem('darkpad_conf_v18', JSON.stringify(this.config)); },
+                borrarNota() { if(confirm("¿Seguro que quieres borrarla?")) { this.notas = this.notas.filter(n => n.id !== this.notaExpandida.id); this.cerrarNota(); } },
+                exportar() { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(this.notas)], {type:'application/json'})); a.download = 'darkpad_v18.2.json'; a.click(); },
+                importar(e) { const r = new FileReader(); r.onload = (f) => { this.notas = JSON.parse(f.target.result); this.guardar(); location.reload(); }; r.readAsText(e.target.files[0]); },
+                
+                get recentDays() { const days = []; for(let i=0; i<14; i++) { const d = new Date(); d.setDate(d.getDate()-i); const s = d.toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit'}); days.push({ dateStr: s, dayNum: d.getDate(), weekday: d.toLocaleDateString('es-ES', {weekday:'short'}), hasNote: this.notas.some(n => n.fecha === s)}); } return days; },
+                get fullMonthDays() { const days = []; for(let i=30; i>=0; i--) { const d = new Date(); d.setDate(new Date().getDate()-i); const s = d.toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit'}); days.push({ dateStr: s, dayNum: d.getDate(), hasNote: this.notas.some(n => n.fecha === s)}); } return days; },
+                get notasFiltradas() { return this.notas.filter(n => (n.texto + (n.titulo || '')).toLowerCase().includes(this.search.toLowerCase()) && (!this.selectedDate || n.fecha === this.selectedDate)).sort((a,b) => b.pinned - a.pinned || b.id - a.id); }
+            }
+        }
+    </script>
+</body>
+</html>
